@@ -1,0 +1,120 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Player {
+  id         String  @id @default(uuid())
+  name       String
+  skillLevel Int     @default(3)
+  isAdmin    Boolean @default(false)
+
+  attendances Attendance[]
+  teamPlayers TeamPlayer[]
+
+  restrictionsAsA Restriction[] @relation("RestrictionA")
+  restrictionsAsB Restriction[] @relation("RestrictionB")
+
+  createdAt DateTime @default(now())
+  games     Game[]   @relation("GameCreator")
+}
+
+model Game {
+  id String @id @default(uuid())
+
+  date      DateTime
+  startTime String
+
+  location String?
+  status   GameStatus @default(OPEN)
+  notes    String?
+
+  maxPlayers Int
+  teamSize   Int   @default(4)
+  hourPrice  Float
+  hours      Int
+
+  attendances Attendance[]
+  teams       Team[]
+  createdById String?
+
+  createdAt DateTime @default(now())
+  createdBy Player?  @relation("GameCreator", fields: [createdById], references: [id])
+
+  @@index([date])
+}
+
+model Attendance {
+  id String @id @default(uuid())
+
+  playerId String
+  gameId   String
+
+  confirmed Boolean @default(true)
+  paid      Boolean @default(false)
+
+  player Player @relation(fields: [playerId], references: [id])
+  game   Game   @relation(fields: [gameId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([playerId, gameId])
+}
+
+model Team {
+  id String @id @default(uuid())
+
+  gameId String
+  name   String
+
+  players TeamPlayer[]
+
+  game Game @relation(fields: [gameId], references: [id])
+
+  @@unique([gameId, name])
+}
+
+model TeamPlayer {
+  id String @id @default(uuid())
+
+  teamId   String
+  playerId String
+
+  team   Team   @relation(fields: [teamId], references: [id])
+  player Player @relation(fields: [playerId], references: [id])
+
+  @@unique([teamId, playerId])
+}
+
+model Restriction {
+  id String @id @default(uuid())
+
+  playerAId String
+  playerBId String
+
+  playerA Player @relation("RestrictionA", fields: [playerAId], references: [id])
+  playerB Player @relation("RestrictionB", fields: [playerBId], references: [id])
+
+  type RestrictionType
+
+  @@unique([playerAId, playerBId])
+}
+
+enum RestrictionType {
+  NOT_TOGETHER
+}
+
+enum GameStatus {
+  OPEN
+  CLOSED
+  FINISHED
+}

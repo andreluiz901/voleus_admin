@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Volei Manager
 
-## Getting Started
+App para organizar jogos de vôlei em grupo (agenda, presenças, times).
 
-First, run the development server:
+## Rodar
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abre em [http://localhost:3000](http://localhost:3000). Admin: `/admin/login`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build
+npm start
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Ambiente
 
-## Learn More
+Defina as variáveis abaixo:
 
-To learn more about Next.js, take a look at the following resources:
+- `DATABASE_URL`
+- `ADMIN_PASSWORD`
+- `TOKEN_SECRET`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Sessão admin: cookie httpOnly (`admin-token`); rotas sob `/admin` redirecionam para `/admin/login` sem sessão (Next.js: [`src/proxy.ts`](src/proxy.ts)).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Exemplo local:
 
-## Deploy on Vercel
+```bash
+DATABASE_URL="postgresql://<user>:<password>@<host>/<db>?sslmode=require"
+ADMIN_PASSWORD="troque-esta-senha"
+TOKEN_SECRET="troque-este-secret"
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Para Neon, use a connection string do projeto e mantenha `sslmode=require`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Prisma (Postgres)
+
+Primeira subida em ambiente novo:
+
+```bash
+npx prisma migrate deploy
+```
+
+Seed (somente dev/homolog, opcional):
+
+```bash
+npx prisma db seed
+```
