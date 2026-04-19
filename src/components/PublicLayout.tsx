@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { colors, spacing, shadows, typography } from "@/styles/theme";
 
 interface PublicLayoutProps {
@@ -30,18 +31,36 @@ export function PublicLayout({ children }: PublicLayoutProps) {
           }}
         >
           <Link href="/jogos" style={{ textDecoration: "none" }}>
-            <h1
+            <div
               style={{
-                margin: "0",
-                ...typography.h2,
-                color: colors.primary,
+                display: "flex",
+                alignItems: "center",
+                gap: spacing.md,
                 cursor: "pointer",
               }}
             >
-              ⚽ Volei Manager
-            </h1>
+              <Image
+                src="/image2.png" // ou "/icon.png" se preferir
+                alt="Logo Voleus"
+                width={34}
+                height={34}
+                priority
+                style={{
+                  borderRadius: 8,
+                  objectFit: "cover",
+                }}
+              />
+              <h1
+                style={{
+                  margin: "0",
+                  ...typography.h2,
+                  color: colors.primary,
+                }}
+              >
+                Voleus Manager
+              </h1>
+            </div>
           </Link>
-
           <div style={{ display: "flex", gap: spacing.lg, alignItems: "center" }}>
             <Link href="/jogos" style={{ textDecoration: "none" }}>
               <span
@@ -76,7 +95,7 @@ export function PublicLayout({ children }: PublicLayoutProps) {
       >
         {children}
       </main>
-
+      
       {/* Footer */}
       <footer
         style={{
@@ -88,7 +107,7 @@ export function PublicLayout({ children }: PublicLayoutProps) {
           fontSize: "14px",
         }}
       >
-        <p style={{ margin: "0" }}>© 2026 Volei Manager. Todos os direitos reservados.</p>
+        <p style={{ margin: "0" }}>© 2026 Voleus Manager. Todos os direitos reservados.</p>
       </footer>
     </div>
   );
