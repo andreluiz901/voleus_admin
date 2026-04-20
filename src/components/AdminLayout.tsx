@@ -11,6 +11,7 @@ interface AdminLayoutProps {
 export function AdminLayout({ children }: AdminLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const sidebarWidth = isMobile ? (sidebarOpen ? "280px" : "0px") : sidebarOpen ? "250px" : "80px";
 
   // Detect mobile on mount and window resize
   useEffect(() => {
@@ -63,18 +64,19 @@ export function AdminLayout({ children }: AdminLayoutProps) {
       {/* Sidebar */}
       <div
         style={{
-          width: sidebarOpen ? (isMobile ? "280px" : "250px") : "80px",
+          width: sidebarWidth,
           backgroundColor: colors.white,
           borderRight: `1px solid ${colors.border}`,
           transition: "width 0.3s ease",
           display: "flex",
           flexDirection: "column",
           boxShadow: shadows.sm,
-          position: isMobile ? (sidebarOpen ? "fixed" : "absolute") : "relative",
+          position: isMobile ? "fixed" : "relative",
           height: "100vh",
           zIndex: isMobile ? 50 : "auto",
           left: 0,
           top: 0,
+          overflow: "hidden",
         }}
       >
         {/* Logo Area */}

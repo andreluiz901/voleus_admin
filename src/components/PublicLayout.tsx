@@ -11,7 +11,16 @@ interface PublicLayoutProps {
 
 export function PublicLayout({ children }: PublicLayoutProps) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", backgroundColor: colors.background }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        minHeight: "100vh",
+        width: "100%",
+        backgroundColor: colors.background,
+        overflowX: "hidden",
+      }}
+    >
       {/* Header */}
       <header
         style={{
@@ -91,6 +100,7 @@ export function PublicLayout({ children }: PublicLayoutProps) {
           width: "100%",
           margin: "0 auto",
           padding: spacing.xl,
+          boxSizing: "border-box",
         }}
       >
         {children}
