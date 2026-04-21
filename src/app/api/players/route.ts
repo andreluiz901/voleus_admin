@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { isAdminAuthenticated } from "@/lib/auth";
+import { isGender } from "@/lib/gender";
+import { prisma } from "@/lib/prisma";
 
 export async function GET() {
   try {
@@ -15,7 +16,7 @@ export async function GET() {
     console.error("Error fetching players:", error);
     return NextResponse.json(
       { error: "Failed to fetch players" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -28,13 +29,13 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, skillLevel } = body;
+    const { name, skillLevel, gender } = body;
 
     // Validar campos obrigatórios
-    if (!name || skillLevel === undefined) {
+    if (!name || skillLevel === undefined || !gender) {
       return NextResponse.json(
-        { error: "Missing required fields: name, skillLevel" },
-        { status: 400 }
+        { error: "Missing required fields: name, skillLevel, gender" },
+        { status: 400 },
       );
     }
 
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     if (skillLevel < 1 || skillLevel > 5) {
       return NextResponse.json(
         { error: "Skill level must be between 1 and 5" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -50,7 +51,14 @@ export async function POST(request: NextRequest) {
     if (typeof name !== "string" || name.trim().length === 0) {
       return NextResponse.json(
         { error: "Player name must be a non-empty string" },
-        { status: 400 }
+        { status: 400 },
+      );
+    }
+
+    if (!isGender(gender)) {
+      return NextResponse.json(
+        { error: "Gender must be one of: MALE, FEMALE, OTHER" },
+        { status: 400 },
       );
     }
 
@@ -59,6 +67,7 @@ export async function POST(request: NextRequest) {
       data: {
         name: name.trim(),
         skillLevel: Number(skillLevel),
+        gender,
       },
     });
 
@@ -67,7 +76,7 @@ export async function POST(request: NextRequest) {
     console.error("Error creating player:", error);
     return NextResponse.json(
       { error: "Failed to create player" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

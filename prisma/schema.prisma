@@ -16,6 +16,7 @@ model Player {
   id         String  @id @default(uuid())
   name       String
   skillLevel Int     @default(3)
+  gender     Gender
   isAdmin    Boolean @default(false)
 
   attendances Attendance[]
@@ -117,4 +118,10 @@ enum GameStatus {
   OPEN
   CLOSED
   FINISHED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
 }

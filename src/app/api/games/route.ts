@@ -1,27 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/auth";
+import { parseDateOnlyAsUtcNoon } from "@/lib/date";
 import { prisma } from "@/lib/prisma";
-
-function parseDateOnlyAsUtcNoon(dateInput: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateInput);
-  if (!match) return null;
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
-    return null;
-  }
-
-  const parsed = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
-  const isValidDate =
-    parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() === month - 1 &&
-    parsed.getUTCDate() === day;
-
-  return isValidDate ? parsed : null;
-}
 
 export async function GET() {
   try {
@@ -46,7 +26,7 @@ export async function GET() {
     console.error("Error fetching games:", error);
     return NextResponse.json(
       { error: "Failed to fetch games" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -55,21 +35,34 @@ export async function POST(request: NextRequest) {
   try {
     const isAuth = await isAdminAuthenticated();
     if (!isAuth) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await request.json();
 
-    const { date, startTime, location, maxPlayers, teamSize, hourPrice, hours, notes } = body;
+    const {
+      date,
+      startTime,
+      location,
+      maxPlayers,
+      teamSize,
+      hourPrice,
+      hours,
+      notes,
+    } = body;
 
     // Validate
-    if (!date || !location || !maxPlayers || !teamSize || hourPrice === undefined || !hours) {
+    if (
+      !date ||
+      !location ||
+      !maxPlayers ||
+      !teamSize ||
+      hourPrice === undefined ||
+      !hours
+    ) {
       return NextResponse.json(
         { error: "Missing required fields" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -77,7 +70,7 @@ export async function POST(request: NextRequest) {
     if (!gameDate) {
       return NextResponse.json(
         { error: "Invalid date format. Expected YYYY-MM-DD." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -100,7 +93,7 @@ export async function POST(request: NextRequest) {
     console.error("Error creating game:", error);
     return NextResponse.json(
       { error: "Failed to create game" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
