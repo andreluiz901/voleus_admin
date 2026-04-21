@@ -21,6 +21,7 @@ model Player {
 
   attendances Attendance[]
   teamPlayers TeamPlayer[]
+  teamLocks   TeamAssignmentLock[]
 
   restrictionsAsA Restriction[] @relation("RestrictionA")
   restrictionsAsB Restriction[] @relation("RestrictionB")
@@ -44,8 +45,10 @@ model Game {
   hourPrice  Float
   hours      Int
 
-  attendances Attendance[]
-  teams       Team[]
+  attendances      Attendance[]
+  teams            Team[]
+  restrictions     Restriction[]
+  teamLocks        TeamAssignmentLock[]
   createdById String?
 
   createdAt DateTime @default(now())
@@ -99,18 +102,34 @@ model TeamPlayer {
 model Restriction {
   id String @id @default(uuid())
 
+  gameId String
   playerAId String
   playerBId String
 
+  game    Game   @relation(fields: [gameId], references: [id])
   playerA Player @relation("RestrictionA", fields: [playerAId], references: [id])
   playerB Player @relation("RestrictionB", fields: [playerBId], references: [id])
 
   type RestrictionType
 
-  @@unique([playerAId, playerBId])
+  @@unique([gameId, playerAId, playerBId])
+}
+
+model TeamAssignmentLock {
+  id String @id @default(uuid())
+
+  gameId String
+  playerId String
+  targetTeamNumber Int
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  player Player @relation(fields: [playerId], references: [id])
+
+  @@unique([gameId, playerId])
 }
 
 enum RestrictionType {
+  TOGETHER
   NOT_TOGETHER
 }
 

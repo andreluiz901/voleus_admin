@@ -1,12 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/auth";
-import { generateTeams } from "@/lib/services/team-generator";
 import { prisma } from "@/lib/prisma";
-
+import { generateTeams } from "@/lib/services/team-generator";
 
 export async function POST(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const isAuth = await isAdminAuthenticated();
@@ -15,6 +14,8 @@ export async function POST(
     }
 
     const { id: gameId } = await params;
+    const body = await request.json().catch(() => ({}));
+    const forceRegenerate = body?.forceRegenerate ?? true;
 
     // Verificar se jogo existe
     const game = await prisma.game.findUnique({
@@ -22,7 +23,17 @@ export async function POST(
     });
 
     if (!game) {
-      return NextResponse.json({ error: "Jogo não encontrado" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Jogo não encontrado" },
+        { status: 404 },
+      );
+    }
+
+    if (!forceRegenerate) {
+      return NextResponse.json(
+        { error: "forceRegenerate must be true for this endpoint" },
+        { status: 400 },
+      );
     }
 
     // Gerar times
@@ -51,11 +62,9 @@ export async function POST(
 
     return NextResponse.json(updatedGame, { status: 200 });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Erro ao gerar times";
+    const errorMessage =
+      error instanceof Error ? error.message : "Erro ao gerar times";
     console.error("Error generating teams:", error);
-    return NextResponse.json(
-      { error: errorMessage },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

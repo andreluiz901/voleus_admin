@@ -50,6 +50,22 @@ type Game = {
   }>;
 };
 
+type GameRestriction = {
+  id: string;
+  type: "TOGETHER" | "NOT_TOGETHER";
+  playerAId: string;
+  playerBId: string;
+  playerA: Player;
+  playerB: Player;
+};
+
+type TeamLock = {
+  id: string;
+  playerId: string;
+  targetTeamNumber: number;
+  player: Player;
+};
+
 export default function GameDetailPage() {
   const params = useParams();
   const gameId = params.id as string;
@@ -66,8 +82,22 @@ export default function GameDetailPage() {
   const [newPlayerGender, setNewPlayerGender] = useState<Gender>("OTHER");
   const [isAddingPlayer, setIsAddingPlayer] = useState(false);
   const [isGeneratingTeams, setIsGeneratingTeams] = useState(false);
+  const [showGenerationPanel, setShowGenerationPanel] = useState(false);
   const [isSavingQuickEdit, setIsSavingQuickEdit] = useState(false);
   const [togglingPayment, setTogglingPayment] = useState<string | null>(null);
+  const [removingPlayerId, setRemovingPlayerId] = useState<string | null>(null);
+  const [restrictions, setRestrictions] = useState<GameRestriction[]>([]);
+  const [locks, setLocks] = useState<TeamLock[]>([]);
+  const [newRestriction, setNewRestriction] = useState<{
+    playerAId: string;
+    playerBId: string;
+    type: "TOGETHER" | "NOT_TOGETHER";
+  }>({
+    playerAId: "",
+    playerBId: "",
+    type: "NOT_TOGETHER",
+  });
+  const [newLock, setNewLock] = useState({ playerId: "", targetTeamNumber: 1 });
   const [quickEdit, setQuickEdit] = useState({
     date: "",
     startTime: "",
@@ -86,10 +116,13 @@ export default function GameDetailPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [gameRes, playersRes] = await Promise.all([
-          fetch(`/api/games/${gameId}`),
-          fetch("/api/players"),
-        ]);
+        const [gameRes, playersRes, restrictionsRes, locksRes] =
+          await Promise.all([
+            fetch(`/api/games/${gameId}`),
+            fetch("/api/players"),
+            fetch(`/api/games/${gameId}/restrictions`),
+            fetch(`/api/games/${gameId}/team-locks`),
+          ]);
 
         if (!gameRes.ok) {
           setError("Jogo não encontrado");
@@ -113,6 +146,12 @@ export default function GameDetailPage() {
           const playersData = await playersRes.json();
           setAllPlayers(playersData);
         }
+        if (restrictionsRes.ok) {
+          setRestrictions(await restrictionsRes.json());
+        }
+        if (locksRes.ok) {
+          setLocks(await locksRes.json());
+        }
       } catch (err) {
         console.error("Error fetching data:", err);
         setError("Erro ao carregar dados");
@@ -132,9 +171,9 @@ export default function GameDetailPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-          name: newPlayerName,
-          skillLevel: newPlayerSkill,
-          gender: newPlayerGender,
+            name: newPlayerName,
+            skillLevel: newPlayerSkill,
+            gender: newPlayerGender,
           }),
         });
 
@@ -149,7 +188,10 @@ export default function GameDetailPage() {
 
         const updatedGame = await response.json();
         setGame(updatedGame);
-        setToast({ message: "Jogador adicionado com sucesso!", type: "success" });
+        setToast({
+          message: "Jogador adicionado com sucesso!",
+          type: "success",
+        });
       } else {
         if (selectedPlayerIds.length === 0) {
           setToast({
@@ -168,7 +210,9 @@ export default function GameDetailPage() {
         if (!response.ok) {
           const data = await response.json();
           setToast({
-            message: data.error || "Nao foi possivel adicionar os jogadores selecionados",
+            message:
+              data.error ||
+              "Nao foi possivel adicionar os jogadores selecionados",
             type: "error",
           });
           return;
@@ -240,8 +284,7 @@ export default function GameDetailPage() {
   };
 
   const handleRemovePlayer = async (playerId: string) => {
-    if (!confirm("Tem certeza que deseja remover este jogador?")) return;
-
+    setRemovingPlayerId(playerId);
     try {
       const response = await fetch(`/api/games/${gameId}/attendance`, {
         method: "DELETE",
@@ -267,6 +310,8 @@ export default function GameDetailPage() {
         message: "Erro ao remover jogador. Tente novamente.",
         type: "error",
       });
+    } finally {
+      setRemovingPlayerId(null);
     }
   };
 
@@ -281,13 +326,12 @@ export default function GameDetailPage() {
       return;
     }
 
-    if (!confirm("Deseja gerar os times?")) return;
-
     setIsGeneratingTeams(true);
     try {
       const response = await fetch(`/api/games/${gameId}/teams/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forceRegenerate: true }),
       });
 
       if (!response.ok) {
@@ -311,6 +355,83 @@ export default function GameDetailPage() {
     } finally {
       setIsGeneratingTeams(false);
     }
+  };
+
+  const refreshRules = async () => {
+    const [restrictionsRes, locksRes] = await Promise.all([
+      fetch(`/api/games/${gameId}/restrictions`),
+      fetch(`/api/games/${gameId}/team-locks`),
+    ]);
+    if (restrictionsRes.ok) setRestrictions(await restrictionsRes.json());
+    if (locksRes.ok) setLocks(await locksRes.json());
+  };
+
+  const handleAddRestriction = async () => {
+    if (!newRestriction.playerAId || !newRestriction.playerBId) {
+      setToast({
+        message: "Selecione os dois jogadores da restricao",
+        type: "warning",
+      });
+      return;
+    }
+    const response = await fetch(`/api/games/${gameId}/restrictions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newRestriction),
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      setToast({
+        message: data.error || "Erro ao salvar restricao",
+        type: "error",
+      });
+      return;
+    }
+    setNewRestriction({ playerAId: "", playerBId: "", type: "NOT_TOGETHER" });
+    await refreshRules();
+  };
+
+  const handleDeleteRestriction = async (restrictionId: string) => {
+    const response = await fetch(`/api/games/${gameId}/restrictions`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ restrictionId }),
+    });
+    if (response.ok) await refreshRules();
+  };
+
+  const handleAddLock = async () => {
+    if (!newLock.playerId || !newLock.targetTeamNumber) {
+      setToast({
+        message: "Selecione jogador e numero do time",
+        type: "warning",
+      });
+      return;
+    }
+    const response = await fetch(`/api/games/${gameId}/team-locks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newLock),
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      setToast({
+        message: data.error || "Erro ao salvar fixacao",
+        type: "error",
+      });
+      return;
+    }
+    setNewLock({ playerId: "", targetTeamNumber: 1 });
+    await refreshRules();
+  };
+
+  const handleDeleteLock = async (lockId: string) => {
+    const response = await fetch(`/api/games/${gameId}/team-locks`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lockId }),
+    });
+    if (response.ok) await refreshRules();
   };
 
   const handleTogglePayment = async (playerId: string) => {
@@ -786,7 +907,7 @@ export default function GameDetailPage() {
                     gap: spacing.md,
                     padding: spacing.md,
                     marginBottom: spacing.lg,
-                  border: `2px ${!isCreatingNew ? `solid ${colors.primary}` : `solid ${colors.border}`}`,
+                    border: `2px ${!isCreatingNew ? `solid ${colors.primary}` : `solid ${colors.border}`}`,
                     borderRadius: "8px",
                     backgroundColor: !isCreatingNew
                       ? "rgba(37, 99, 235, 0.05)"
@@ -902,7 +1023,9 @@ export default function GameDetailPage() {
                           }}
                         >
                           {availablePlayers.map((player) => {
-                            const checked = selectedPlayerIds.includes(player.id);
+                            const checked = selectedPlayerIds.includes(
+                              player.id,
+                            );
                             return (
                               <label
                                 key={player.id}
@@ -922,7 +1045,9 @@ export default function GameDetailPage() {
                                 <input
                                   type="checkbox"
                                   checked={checked}
-                                  onChange={() => toggleSelectedPlayer(player.id)}
+                                  onChange={() =>
+                                    toggleSelectedPlayer(player.id)
+                                  }
                                   style={{
                                     accentColor: colors.primary,
                                     width: "16px",
@@ -935,7 +1060,8 @@ export default function GameDetailPage() {
                                     color: colors.textPrimary,
                                   }}
                                 >
-                                  {player.name} • {getSkillLabel(player.skillLevel)}
+                                  {player.name} •{" "}
+                                  {getSkillLabel(player.skillLevel)}
                                 </span>
                               </label>
                             );
@@ -985,7 +1111,7 @@ export default function GameDetailPage() {
                     gap: spacing.md,
                     padding: spacing.md,
                     marginBottom: spacing.lg,
-                  border: `2px ${isCreatingNew ? `solid ${colors.primary}` : `solid ${colors.border}`}`,
+                    border: `2px ${isCreatingNew ? `solid ${colors.primary}` : `solid ${colors.border}`}`,
                     borderRadius: "8px",
                     backgroundColor: isCreatingNew
                       ? "rgba(37, 99, 235, 0.05)"
@@ -1179,14 +1305,20 @@ export default function GameDetailPage() {
                           <button
                             type="button"
                             onClick={() => handleRemovePlayer(a.playerId)}
+                            disabled={removingPlayerId === a.playerId}
                             style={{
                               background: "none",
                               border: "none",
                               fontSize: "18px",
-                              cursor: "pointer",
+                              cursor:
+                                removingPlayerId === a.playerId
+                                  ? "wait"
+                                  : "pointer",
                               color: colors.error,
                               padding: "0",
                               marginLeft: spacing.sm,
+                              opacity:
+                                removingPlayerId === a.playerId ? 0.6 : 1,
                             }}
                           >
                             ✕
@@ -1320,7 +1452,22 @@ export default function GameDetailPage() {
           )}
 
           {/* Generate Teams Button */}
-          <div style={{ display: "flex", gap: spacing.lg, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: spacing.lg,
+              flexWrap: "wrap",
+              marginBottom: spacing.lg,
+            }}
+          >
+            <Button
+              variant="secondary"
+              onClick={() => setShowGenerationPanel((prev) => !prev)}
+            >
+              {showGenerationPanel
+                ? "Ocultar configuracao"
+                : "Configurar geracao"}
+            </Button>
             <Button
               size="lg"
               onClick={handleGenerateTeams}
@@ -1343,6 +1490,225 @@ export default function GameDetailPage() {
               </p>
             )}
           </div>
+          {showGenerationPanel && (
+            <Card style={{ padding: spacing.lg, marginBottom: spacing.lg }}>
+              <h3
+                style={{
+                  margin: "0 0 12px 0",
+                  ...typography.h3,
+                  color: colors.textPrimary,
+                }}
+              >
+                Regras de geracao deste jogo
+              </h3>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: spacing.lg,
+                }}
+              >
+                <div>
+                  <p
+                    style={{
+                      margin: "0 0 8px 0",
+                      ...typography.bodySmall,
+                      fontWeight: "600",
+                      color: colors.textPrimary,
+                    }}
+                  >
+                    Restricoes (juntos/separados)
+                  </p>
+                  <FormSelect
+                    label="Jogador A"
+                    value={newRestriction.playerAId}
+                    onChange={(e) =>
+                      setNewRestriction((prev) => ({
+                        ...prev,
+                        playerAId: e.target.value,
+                      }))
+                    }
+                    options={[
+                      { value: "", label: "Selecione" },
+                      ...game.attendances
+                        .filter((a) => a.confirmed)
+                        .map((a) => ({
+                          value: a.playerId,
+                          label: a.player.name,
+                        })),
+                    ]}
+                  />
+                  <FormSelect
+                    label="Jogador B"
+                    value={newRestriction.playerBId}
+                    onChange={(e) =>
+                      setNewRestriction((prev) => ({
+                        ...prev,
+                        playerBId: e.target.value,
+                      }))
+                    }
+                    options={[
+                      { value: "", label: "Selecione" },
+                      ...game.attendances
+                        .filter((a) => a.confirmed)
+                        .map((a) => ({
+                          value: a.playerId,
+                          label: a.player.name,
+                        })),
+                    ]}
+                  />
+                  <FormSelect
+                    label="Tipo"
+                    value={newRestriction.type}
+                    onChange={(e) =>
+                      setNewRestriction((prev) => ({
+                        ...prev,
+                        type: e.target.value as "TOGETHER" | "NOT_TOGETHER",
+                      }))
+                    }
+                    options={[
+                      { value: "TOGETHER", label: "Ficam juntos" },
+                      { value: "NOT_TOGETHER", label: "Ficam separados" },
+                    ]}
+                  />
+                  <Button size="sm" onClick={handleAddRestriction}>
+                    Adicionar restricao
+                  </Button>
+                  <div
+                    style={{
+                      marginTop: spacing.sm,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: spacing.xs,
+                    }}
+                  >
+                    {restrictions.map((restriction) => (
+                      <div
+                        key={restriction.id}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: spacing.sm,
+                        }}
+                      >
+                        <span
+                          style={{
+                            ...typography.caption,
+                            color: colors.textSecondary,
+                          }}
+                        >
+                          {restriction.playerA.name}{" "}
+                          {restriction.type === "TOGETHER" ? "com" : "sem"}{" "}
+                          {restriction.playerB.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDeleteRestriction(restriction.id)
+                          }
+                          style={{
+                            border: "none",
+                            background: "none",
+                            color: colors.error,
+                            cursor: "pointer",
+                          }}
+                        >
+                          remover
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p
+                    style={{
+                      margin: "0 0 8px 0",
+                      ...typography.bodySmall,
+                      fontWeight: "600",
+                      color: colors.textPrimary,
+                    }}
+                  >
+                    Fixar jogador em time
+                  </p>
+                  <FormSelect
+                    label="Jogador"
+                    value={newLock.playerId}
+                    onChange={(e) =>
+                      setNewLock((prev) => ({
+                        ...prev,
+                        playerId: e.target.value,
+                      }))
+                    }
+                    options={[
+                      { value: "", label: "Selecione" },
+                      ...game.attendances
+                        .filter((a) => a.confirmed)
+                        .map((a) => ({
+                          value: a.playerId,
+                          label: a.player.name,
+                        })),
+                    ]}
+                  />
+                  <FormInput
+                    label="Numero do time"
+                    type="number"
+                    min="1"
+                    value={newLock.targetTeamNumber}
+                    onChange={(e) =>
+                      setNewLock((prev) => ({
+                        ...prev,
+                        targetTeamNumber: Number(e.target.value),
+                      }))
+                    }
+                  />
+                  <Button size="sm" onClick={handleAddLock}>
+                    Adicionar fixacao
+                  </Button>
+                  <div
+                    style={{
+                      marginTop: spacing.sm,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: spacing.xs,
+                    }}
+                  >
+                    {locks.map((lock) => (
+                      <div
+                        key={lock.id}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: spacing.sm,
+                        }}
+                      >
+                        <span
+                          style={{
+                            ...typography.caption,
+                            color: colors.textSecondary,
+                          }}
+                        >
+                          {lock.player.name} fixo no Time{" "}
+                          {lock.targetTeamNumber}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteLock(lock.id)}
+                          style={{
+                            border: "none",
+                            background: "none",
+                            color: colors.error,
+                            cursor: "pointer",
+                          }}
+                        >
+                          remover
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
         </div>
       </AdminLayout>
       {toast && (

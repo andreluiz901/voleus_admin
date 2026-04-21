@@ -1,5 +1,150 @@
 import { prisma } from "@/lib/prisma";
 
+type GenPlayer = {
+  id: string;
+  name: string;
+  skillLevel: number;
+};
+
+type Restriction = {
+  playerAId: string;
+  playerBId: string;
+  type: "TOGETHER" | "NOT_TOGETHER";
+};
+
+type TeamLock = {
+  playerId: string;
+  targetTeamNumber: number;
+};
+
+type GenerationResult = {
+  teams: GenPlayer[][];
+  benchPlayers: GenPlayer[];
+  score: number;
+};
+
+function isPair(a: string, b: string, x: string, y: string) {
+  return (a === x && b === y) || (a === y && b === x);
+}
+
+function hasForbiddenPair(team: GenPlayer[], restrictions: Restriction[]) {
+  for (let i = 0; i < team.length; i++) {
+    for (let j = i + 1; j < team.length; j++) {
+      if (
+        restrictions.some(
+          (r) =>
+            r.type === "NOT_TOGETHER" &&
+            isPair(team[i].id, team[j].id, r.playerAId, r.playerBId),
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function togetherPenalty(teams: GenPlayer[][], restrictions: Restriction[]) {
+  let penalty = 0;
+  for (const restriction of restrictions) {
+    if (restriction.type !== "TOGETHER") continue;
+    const teamA = teams.find((team) =>
+      team.some((player) => player.id === restriction.playerAId),
+    );
+    const teamB = teams.find((team) =>
+      team.some((player) => player.id === restriction.playerBId),
+    );
+    if (!teamA || !teamB || teamA !== teamB) {
+      penalty += 1000;
+    }
+  }
+  return penalty;
+}
+
+function getSkillBalanceScore(teams: GenPlayer[][]) {
+  const totals = teams.map((team) =>
+    team.reduce((sum, player) => sum + player.skillLevel, 0),
+  );
+  const max = Math.max(...totals);
+  const min = Math.min(...totals);
+  return max - min;
+}
+
+function randomShuffle<T>(items: T[]) {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function tryGenerate(
+  regularPlayers: GenPlayer[],
+  teamSize: number,
+  totalTeams: number,
+  restrictions: Restriction[],
+  locks: TeamLock[],
+): GenerationResult | null {
+  const teams: GenPlayer[][] = Array.from({ length: totalTeams }, () => []);
+  const lockMap = new Map<string, number>();
+
+  for (const lock of locks) {
+    const targetIndex = lock.targetTeamNumber - 1;
+    if (targetIndex < 0 || targetIndex >= totalTeams) return null;
+    lockMap.set(lock.playerId, targetIndex);
+  }
+
+  const lockedIds = new Set(locks.map((lock) => lock.playerId));
+  const playersById = new Map(
+    regularPlayers.map((player) => [player.id, player]),
+  );
+
+  for (const lock of locks) {
+    const player = playersById.get(lock.playerId);
+    if (!player) return null;
+    const targetIndex = lock.targetTeamNumber - 1;
+    teams[targetIndex].push(player);
+    if (teams[targetIndex].length > teamSize) return null;
+  }
+
+  const unlockedPlayers = randomShuffle(
+    regularPlayers.filter((player) => !lockedIds.has(player.id)),
+  );
+
+  unlockedPlayers.sort((a, b) => b.skillLevel - a.skillLevel);
+
+  for (const player of unlockedPlayers) {
+    const preferredOrder = [...teams.keys()].sort(
+      (a, b) =>
+        teams[a].reduce((sum, p) => sum + p.skillLevel, 0) -
+        teams[b].reduce((sum, p) => sum + p.skillLevel, 0),
+    );
+
+    let placed = false;
+    for (const index of preferredOrder) {
+      if (teams[index].length >= teamSize) continue;
+      const candidate = [...teams[index], player];
+      if (hasForbiddenPair(candidate, restrictions)) continue;
+      teams[index].push(player);
+      placed = true;
+      break;
+    }
+
+    if (!placed) {
+      return null;
+    }
+  }
+
+  for (const team of teams) {
+    if (team.length !== teamSize) return null;
+  }
+
+  const score =
+    getSkillBalanceScore(teams) + togetherPenalty(teams, restrictions);
+  return { teams, benchPlayers: [], score };
+}
+
 export async function generateTeams(gameId: string) {
   // 0 — Limpar times antigos
   await prisma.teamPlayer.deleteMany({
@@ -48,7 +193,7 @@ export async function generateTeams(gameId: string) {
   // 3 — Validar mínimo de jogadores (precisa de ao menos 2 times completos)
   if (players.length < minPlayerCount) {
     throw new Error(
-      `Jogadores insuficientes. Mínimo necessário: ${minPlayerCount}, Confirmados: ${players.length}`
+      `Jogadores insuficientes. Mínimo necessário: ${minPlayerCount}, Confirmados: ${players.length}`,
     );
   }
 
@@ -64,34 +209,67 @@ export async function generateTeams(gameId: string) {
   const regularPlayers = players.slice(0, playersInRegularTeams);
   const benchPlayers = players.slice(playersInRegularTeams);
 
-  // 7 — Criar estrutura de times regulares
-  type PlayerType = typeof players[number];
+  const teamAssignmentLockDelegate = (
+    prisma as unknown as {
+      teamAssignmentLock?: {
+        findMany: (args: {
+          where: { gameId: string };
+          select: { playerId: true; targetTeamNumber: true };
+        }) => Promise<TeamLock[]>;
+      };
+    }
+  ).teamAssignmentLock;
 
-  const teams: PlayerType[][] = [];
+  const restrictionsPromise = prisma.restriction
+    .findMany({
+      where: { gameId },
+      select: { playerAId: true, playerBId: true, type: true },
+    })
+    .catch(async () =>
+      prisma.restriction.findMany({
+        // Fallback for environments where Restriction is not game-scoped yet.
+        select: { playerAId: true, playerBId: true, type: true },
+      }),
+    );
 
-  for (let i = 0; i < totalTeams; i++) {
-    teams.push([]);
+  const [restrictions, locks] = await Promise.all([
+    restrictionsPromise,
+    teamAssignmentLockDelegate?.findMany({
+      where: { gameId },
+      select: { playerId: true, targetTeamNumber: true },
+    }) ?? Promise.resolve([]),
+  ]);
+
+  const confirmedIds = new Set(players.map((player) => player.id));
+  const invalidLock = locks.find((lock) => !confirmedIds.has(lock.playerId));
+  if (invalidLock) {
+    throw new Error("Existe fixacao com jogador nao confirmado neste jogo");
   }
 
-  // 8 — Distribuição em snake (apenas times regulares)
-  let direction = 1;
-  let teamIndex = 0;
-
-  for (const player of regularPlayers) {
-    teams[teamIndex].push(player);
-
-    teamIndex += direction;
-
-    if (teamIndex === totalTeams) {
-      direction = -1;
-      teamIndex = totalTeams - 1;
+  let bestResult: GenerationResult | null = null;
+  const attempts = 120;
+  for (let i = 0; i < attempts; i++) {
+    const result = tryGenerate(
+      regularPlayers,
+      teamSize,
+      totalTeams,
+      restrictions,
+      locks,
+    );
+    if (!result) continue;
+    if (!bestResult || result.score < bestResult.score) {
+      bestResult = result;
     }
-
-    if (teamIndex < 0) {
-      direction = 1;
-      teamIndex = 0;
-    }
+    if (bestResult.score === 0) break;
   }
+
+  if (!bestResult) {
+    throw new Error(
+      "Nao foi possivel gerar times respeitando as regras configuradas para este jogo",
+    );
+  }
+
+  const teams = bestResult.teams;
 
   // 9 — Salvar times regulares no banco
   for (let i = 0; i < teams.length; i++) {
