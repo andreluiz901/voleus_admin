@@ -1,8 +1,9 @@
 "use client";
 
+import { toPng } from "html-to-image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AdminLayout } from "@/components/AdminLayout";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -86,8 +87,11 @@ export default function GameDetailPage() {
   const [isSavingQuickEdit, setIsSavingQuickEdit] = useState(false);
   const [togglingPayment, setTogglingPayment] = useState<string | null>(null);
   const [removingPlayerId, setRemovingPlayerId] = useState<string | null>(null);
+  const [isCopyingSummary, setIsCopyingSummary] = useState(false);
+  const [isExportingImage, setIsExportingImage] = useState(false);
   const [restrictions, setRestrictions] = useState<GameRestriction[]>([]);
   const [locks, setLocks] = useState<TeamLock[]>([]);
+  const exportCardRef = useRef<HTMLDivElement>(null);
   const [newRestriction, setNewRestriction] = useState<{
     playerAId: string;
     playerBId: string;
@@ -514,6 +518,8 @@ export default function GameDetailPage() {
   const availablePlayers = allPlayers.filter(
     (p) => !game.attendances.some((a) => a.playerId === p.id),
   );
+  const formatCurrency = (value: number) =>
+    value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
   const toggleSelectedPlayer = (playerId: string) => {
     setSelectedPlayerIds((prev) =>
@@ -521,6 +527,148 @@ export default function GameDetailPage() {
         ? prev.filter((id) => id !== playerId)
         : [...prev, playerId],
     );
+  };
+
+  const buildShareSummary = () => {
+    const playersBySkill = [...game.attendances]
+      .filter((attendance) => attendance.confirmed)
+      .sort((a, b) => b.player.skillLevel - a.player.skillLevel);
+    const paidCount = playersBySkill.filter(
+      (attendance) => attendance.paid,
+    ).length;
+
+    const teamLines = game.teams.flatMap((team) => [
+      `${team.name} (Skill ${getPlayerSkillTotal(team.id)})`,
+      ...team.players.map(
+        (teamPlayer) =>
+          `  - ${teamPlayer.player.name} (${getSkillLabel(teamPlayer.player.skillLevel)})`,
+      ),
+      "",
+    ]);
+
+    const playerLines = playersBySkill.map(
+      (attendance, index) =>
+        `${index + 1}. ${attendance.player.name} - ${getSkillLabel(attendance.player.skillLevel)} - ${attendance.paid ? "Pago" : "Pendente"}`,
+    );
+
+    return [
+      `🏐 Jogo - ${formattedDate}`,
+      `${game.startTime} | ${game.location}`,
+      "",
+      "📊 Resumo",
+      `- Confirmados: ${confirmedPlayers}/${game.maxPlayers}`,
+      `- Times gerados: ${game.teams.length}`,
+      `- Valor total: ${formatCurrency(totalCost)}`,
+      `- Valor por jogador: ${formatCurrency(pricePerPlayer)}`,
+      `- Pagamentos: ${paidCount}/${confirmedPlayers}`,
+      "",
+      "👥 Jogadores",
+      ...playerLines,
+      "",
+      "🧩 Times",
+      ...teamLines,
+      "Gerado no Volei Manager",
+    ].join("\n");
+  };
+
+  const handleCopySummary = async () => {
+    if (!game.teams.length) {
+      setToast({
+        message: "Gere os times antes de copiar o resumo",
+        type: "warning",
+      });
+      return;
+    }
+
+    setIsCopyingSummary(true);
+    try {
+      await navigator.clipboard.writeText(buildShareSummary());
+      setToast({
+        message: "Resumo completo copiado para a area de transferencia!",
+        type: "success",
+      });
+    } catch (err) {
+      console.error("Error copying summary:", err);
+      setToast({
+        message: "Nao foi possivel copiar o resumo",
+        type: "error",
+      });
+    } finally {
+      setIsCopyingSummary(false);
+    }
+  };
+
+  const handleExportImage = async () => {
+    if (!exportCardRef.current || !game.teams.length) {
+      setToast({
+        message: "Gere os times antes de exportar imagem",
+        type: "warning",
+      });
+      return;
+    }
+
+    setIsExportingImage(true);
+    try {
+      const dataUrl = await toPng(exportCardRef.current, {
+        cacheBust: true,
+        pixelRatio: 2.5,
+        backgroundColor: colors.background,
+      });
+
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      const fileName = `times-${quickEdit.date || game.id}.png`;
+      const imageFile = new File([blob], fileName, { type: "image/png" });
+
+      if (
+        navigator.share &&
+        navigator.canShare &&
+        navigator.canShare({ files: [imageFile] })
+      ) {
+        await navigator.share({
+          title: `Times ${formattedDate}`,
+          text: `Times gerados para o jogo de ${formattedDate}`,
+          files: [imageFile],
+        });
+        setToast({
+          message: "Imagem pronta e compartilhada com sucesso!",
+          type: "success",
+        });
+        return;
+      }
+
+      const downloadLink = document.createElement("a");
+      downloadLink.download = fileName;
+      downloadLink.href = dataUrl;
+      downloadLink.click();
+
+      setToast({
+        message: "Imagem exportada! Agora e so compartilhar no WhatsApp.",
+        type: "success",
+      });
+    } catch (err) {
+      console.error("Error exporting image:", err);
+      setToast({
+        message: "Erro ao gerar a imagem para compartilhamento",
+        type: "error",
+      });
+    } finally {
+      setIsExportingImage(false);
+    }
+  };
+
+  const handleShareOnWhatsApp = () => {
+    if (!game.teams.length) {
+      setToast({
+        message: "Gere os times antes de compartilhar no WhatsApp",
+        type: "warning",
+      });
+      return;
+    }
+
+    const summary = buildShareSummary();
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(summary)}`;
+    window.open(whatsappUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -1383,6 +1531,33 @@ export default function GameDetailPage() {
               >
                 🏐 Times ({game.teams.length})
               </h2>
+              <div
+                style={{
+                  display: "flex",
+                  gap: spacing.md,
+                  marginBottom: spacing.lg,
+                  flexWrap: "wrap",
+                }}
+              >
+                <Button
+                  variant="secondary"
+                  onClick={handleCopySummary}
+                  disabled={isCopyingSummary}
+                  loading={isCopyingSummary}
+                >
+                  📋 Copiar resumo para compartilhar
+                </Button>
+                <Button
+                  onClick={handleExportImage}
+                  disabled={isExportingImage}
+                  loading={isExportingImage}
+                >
+                  🖼️ Exportar imagem dos times
+                </Button>
+                <Button variant="secondary" onClick={handleShareOnWhatsApp}>
+                  💬 Compartilhar no WhatsApp
+                </Button>
+              </div>
 
               <div
                 style={{
@@ -1447,6 +1622,233 @@ export default function GameDetailPage() {
                     </div>
                   </Card>
                 ))}
+              </div>
+
+              <div
+                style={{
+                  position: "fixed",
+                  left: "-9999px",
+                  top: "0",
+                  width: "960px",
+                  padding: spacing.xxl,
+                  background:
+                    "linear-gradient(135deg, #eef4ff 0%, #f8f9fa 55%, #f2fdf5 100%)",
+                  color: colors.textPrimary,
+                  borderRadius: "20px",
+                }}
+              >
+                <div
+                  ref={exportCardRef}
+                  style={{
+                    borderRadius: "20px",
+                    border: `1px solid ${colors.border}`,
+                    backgroundColor: colors.white,
+                    overflow: "hidden",
+                    boxShadow: "0 10px 32px rgba(0, 0, 0, 0.12)",
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: spacing.xxl,
+                      background:
+                        "linear-gradient(120deg, #1e40af 0%, #2563eb 60%, #3b82f6 100%)",
+                      color: colors.white,
+                    }}
+                  >
+                    <p style={{ margin: `0 0 ${spacing.xs} 0`, opacity: 0.9 }}>
+                      VOLEI MANAGER
+                    </p>
+                    <h2
+                      style={{
+                        margin: `0 0 ${spacing.sm} 0`,
+                        fontSize: "36px",
+                      }}
+                    >
+                      Times do jogo - {formattedDate}
+                    </h2>
+                    <p style={{ margin: "0", fontSize: "18px", opacity: 0.95 }}>
+                      {game.startTime} • {game.location}
+                    </p>
+                  </div>
+
+                  <div style={{ padding: spacing.xxl }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                        gap: spacing.lg,
+                        marginBottom: spacing.xl,
+                      }}
+                    >
+                      <div
+                        style={{
+                          backgroundColor: "#eef4ff",
+                          padding: spacing.lg,
+                          borderRadius: "12px",
+                        }}
+                      >
+                        <p
+                          style={{
+                            margin: `0 0 ${spacing.xs} 0`,
+                            color: colors.textSecondary,
+                          }}
+                        >
+                          Confirmados
+                        </p>
+                        <p
+                          style={{
+                            margin: "0",
+                            fontSize: "24px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {confirmedPlayers}/{game.maxPlayers}
+                        </p>
+                      </div>
+                      <div
+                        style={{
+                          backgroundColor: "#ecfdf3",
+                          padding: spacing.lg,
+                          borderRadius: "12px",
+                        }}
+                      >
+                        <p
+                          style={{
+                            margin: `0 0 ${spacing.xs} 0`,
+                            color: colors.textSecondary,
+                          }}
+                        >
+                          Valor por jogador
+                        </p>
+                        <p
+                          style={{
+                            margin: "0",
+                            fontSize: "24px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {formatCurrency(pricePerPlayer)}
+                        </p>
+                      </div>
+                      <div
+                        style={{
+                          backgroundColor: "#fff7ed",
+                          padding: spacing.lg,
+                          borderRadius: "12px",
+                        }}
+                      >
+                        <p
+                          style={{
+                            margin: `0 0 ${spacing.xs} 0`,
+                            color: colors.textSecondary,
+                          }}
+                        >
+                          Total da quadra
+                        </p>
+                        <p
+                          style={{
+                            margin: "0",
+                            fontSize: "24px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {formatCurrency(totalCost)}
+                        </p>
+                      </div>
+                      <div
+                        style={{
+                          backgroundColor: "#f5f3ff",
+                          padding: spacing.lg,
+                          borderRadius: "12px",
+                        }}
+                      >
+                        <p
+                          style={{
+                            margin: `0 0 ${spacing.xs} 0`,
+                            color: colors.textSecondary,
+                          }}
+                        >
+                          Times
+                        </p>
+                        <p
+                          style={{
+                            margin: "0",
+                            fontSize: "24px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {game.teams.length}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gap: spacing.lg,
+                      }}
+                    >
+                      {game.teams.map((team) => (
+                        <div
+                          key={`share-${team.id}`}
+                          style={{
+                            border: `1px solid ${colors.border}`,
+                            borderRadius: "12px",
+                            padding: spacing.lg,
+                            backgroundColor: "#fcfcfd",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              marginBottom: spacing.sm,
+                            }}
+                          >
+                            <h3
+                              style={{
+                                margin: "0",
+                                color: colors.primaryDark,
+                                fontSize: "22px",
+                              }}
+                            >
+                              {team.name}
+                            </h3>
+                            <span
+                              style={{
+                                color: colors.textSecondary,
+                                fontSize: "14px",
+                                fontWeight: 600,
+                              }}
+                            >
+                              Skill {getPlayerSkillTotal(team.id)}
+                            </span>
+                          </div>
+                          <div style={{ display: "grid", gap: spacing.xs }}>
+                            {team.players.map((teamPlayer) => (
+                              <p
+                                key={`share-player-${teamPlayer.id}`}
+                                style={{ margin: "0", fontSize: "16px" }}
+                              >
+                                • {teamPlayer.player.name}
+                                <span
+                                  style={{
+                                    marginLeft: spacing.sm,
+                                    color: colors.textSecondary,
+                                    fontSize: "14px",
+                                  }}
+                                >
+                                  {getSkillLabel(teamPlayer.player.skillLevel)}
+                                </span>
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
